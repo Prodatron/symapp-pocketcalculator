@@ -1,6 +1,6 @@
 nolist
 
 org #1000
-write "e:\symbos\apps\calc.exe"
-READ "..\SymbOS-Constants.asm"
+write "f:\symbos\apps\calc.exe"
+READ "..\..\..\..\SVN-Main\trunk\SymbOS-Constants.asm"
 READ "App-Calc.asm"
