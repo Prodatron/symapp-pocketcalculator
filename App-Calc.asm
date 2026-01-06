@@ -50,17 +50,17 @@ prgpstmem       equ 48          ;additional memory areas; 8 memory areas can be 
 prgpstnum       equ 88          ;Application ID
 prgpstprz       equ 89          ;Main process ID
 
-prgcodbeg   dw prgdatbeg-prgcodbeg  ;length of code area
-            dw prgtrnbeg-prgdatbeg  ;length of data area
-            dw prgtrnend-prgtrnbeg  ;length of transfer area
+App_BegCode dw App_BegData-App_BegCode  ;length of code area
+            dw App_BegTrns-App_BegData  ;length of data area
+            dw App_EndTrns-App_BegTrns  ;length of transfer area
 prgdatadr   dw #1000                ;original origin                    POST address data area
 prgtrnadr   dw relocate_count       ;number of relocator table entries  POST address transfer area
-prgprztab   dw prgstk-prgtrnbeg     ;stack length                       POST table processes
+prgprztab   dw prgstk-App_BegTrns     ;stack length                     POST table processes
             dw 0                    ;*reserved*
-prgbnknum   db 0                    ;*reserved*                         POST bank number
+App_BnkNum  db 0                    ;*reserved*                         POST bank number
             db "Pocket Calculator":ds 15-8:db 0 ;name
             db 1                    ;flags (+1=16c icon)
-            dw prgicn16c-prgcodbeg  ;16 colour icon offset
+            dw prgicn16c-App_BegCode  ;16 colour icon offset
             ds 5                    ;*reserved*
 prgmemtab   db "SymExe10"           ;SymbOS-EXE-identifier              POST table reserved memory areas
             dw 0                    ;additional code memory
@@ -81,12 +81,13 @@ sysprzn     db 3
 windatprz   equ 3
 prgwin      db 0
 
-prgprz  call SySystem_HLPINI
-        ld a,(prgprzn)
+prgprz  call prglng
+        call SySystem_HLPINI
+        ld a,(App_PrcID)
         ld (prgwindat+windatprz),a
 
         ld c,MSC_DSK_WINOPN
-        ld a,(prgbnknum)
+        ld a,(App_BnkNum)
         ld b,a
         ld de,prgwindat
         call msgsnd             ;open window
@@ -95,7 +96,7 @@ prgprz1 call msgdsk             ;get message -> IXL=status, IXH=sender process
         jp z,prgend             ;no memory for new window -> bye bye
         cp MSR_DSK_WOPNOK
         jr nz,prgprz1           ;other message -> ignore
-        ld a,(prgmsgb+4)
+        ld a,(App_MsgBuf+4)
         ld (prgwin),a           ;window has been opened -> save number
 
         ld a,1                  ;set deg
@@ -194,13 +195,13 @@ prgkey2 inc hl
         jp (hl)
 
 ;### PRGEND -> Quit program
-prgend  ld a,(prgprzn)
+prgend  ld a,(App_PrcID)
         db #dd:ld l,a
         ld a,(sysprzn)
         db #dd:ld h,a
-        ld iy,prgmsgb
+        ld iy,App_MsgBuf
         ld (iy+0),MSC_SYS_PRGEND
-        ld a,(prgcodbeg+prgpstnum)
+        ld a,(App_BegCode+prgpstnum)
         ld (iy+1),a
         rst #10
 prgend0 rst #30
@@ -211,18 +212,69 @@ prginf  ld hl,prgmsginf         ;*** Info-Window
         ld b,1+128
         call prginf0
         jp prgprz0
-prginf0 ld (prgmsgb+1),hl
-        ld a,(prgbnknum)
+prginf0 ld (App_MsgBuf+1),hl
+        ld a,(App_BnkNum)
         ld c,a
-        ld (prgmsgb+3),bc
+        ld (App_MsgBuf+3),bc
         ld a,MSC_SYS_SYSWRN
-        ld (prgmsgb),a
-        ld a,(prgprzn)
+        ld (App_MsgBuf),a
+        ld a,(App_PrcID)
         db #dd:ld l,a
         ld a,(sysprzn)
         db #dd:ld h,a
-        ld iy,prgmsgb
+        ld iy,App_MsgBuf
         rst #10
+        ret
+
+;### PRGLNG -> load language pack
+prglng  ld hl,(App_BegCode)
+        ld de,App_BegCode
+        dec h
+        add hl,de               ;HL=code area end=path
+        ex de,hl
+        ld a,(App_BnkNum)
+        ld c,a
+        ld hl,texts_int
+        ld ix,256*0+9           ;default language=9 (english), pack=0
+        ld iyl,0                ;language-file version 0
+        jp SySystem_LNGLOD
+
+SySystem_LNGLOD
+        ld (App_MsgBuf+6),a
+        ld (App_MsgBuf+7),bc
+        ld (App_MsgBuf+8),hl
+        ld (App_MsgBuf+10),ix
+        ld (App_MsgBuf+12),iy
+        ld a,(App_BnkNum)
+        ld iyh,a
+        ld c,MSC_SYS_EXTFNC
+        ld l,FNC_DXT_LNGLOD
+        call SySystem_SendMessage
+SySLLo1 call SySystem_WaitMessage
+        cp MSR_SYS_EXTFNC
+        jr nz,SySLLo1
+        ld a,(App_MsgBuf+1)
+        ret
+SySystem_SendMessage
+        ld iy,App_MsgBuf
+        ld (iy+0),c
+        ld (App_MsgBuf+1),hl
+        ld (iy+3),a
+        ld (App_MsgBuf+4),de
+        db #dd:ld h,3       ;3 is the number of the system manager process
+        ld a,(App_PrcID)
+        db #dd:ld l,a
+        rst #10
+        ret
+SySystem_WaitMessage
+        ld iy,App_MsgBuf
+SySWMs1 db #dd:ld h,3       ;3 is the number of the system manager process
+        ld a,(App_PrcID)
+        db #dd:ld l,a
+        rst #08             ;wait for a system manager message
+        db #dd:dec l
+        jr nz,SySWMs1
+        ld a,(iy+0)
         ret
 
 
@@ -1124,8 +1176,8 @@ SySystem_HLPPTH1 ds 128
 SySHInX db ".HLP",0
 
 SySystem_HLPINI
-        ld hl,(prgcodbeg)
-        ld de,prgcodbeg
+        ld hl,(App_BegCode)
+        ld de,App_BegCode
         dec h
         add hl,de                   ;HL = CodeEnd = Command line
         ld de,SySystem_HLPPTH1
@@ -1161,7 +1213,7 @@ SySHIn3 ld a,c
 hlpopn  ld a,(SySystem_HLPFLG)
         or a
         jp z,prgprz0
-        ld a,(prgbnknum)
+        ld a,(App_BnkNum)
         ld d,a
         ld a,PRC_ID_SYSTEM
         ld c,MSC_SYS_PRGRUN
@@ -1174,15 +1226,15 @@ hlpopn  ld a,(SySystem_HLPFLG)
 ;### MSGGET -> Message für Programm abholen
 ;### Ausgabe    CF=0 -> keine Message vorhanden, CF=1 -> IXH=Absender, (recmsgb)=Message, A=(recmsgb+0), IY=recmsgb
 ;### Veraendert 
-msgget  ld a,(prgprzn)
+msgget  ld a,(App_PrcID)
         db #dd:ld l,a           ;IXL=Rechner-Prozeß-Nummer
         db #dd:ld h,-1
-        ld iy,prgmsgb           ;IY=Messagebuffer
+        ld iy,App_MsgBuf           ;IY=Messagebuffer
         rst #08                 ;Message holen -> IXL=Status, IXH=Absender-Prozeß
         or a
         db #dd:dec l
         ret nz
-        ld iy,prgmsgb
+        ld iy,App_MsgBuf
         ld a,(iy+0)
         or a
         jp z,prgend
@@ -1197,7 +1249,7 @@ msgdsk  call msgget
         ld a,(dskprzn)
         db #dd:cp h
         jr nz,msgdsk            ;Message von anderem als Desktop-Prozeß -> ignorieren
-        ld a,(prgmsgb)
+        ld a,(App_MsgBuf)
         ret
 
 ;### MSGSND -> Message an Desktop-Prozess senden
@@ -1207,9 +1259,9 @@ msgsnd2 ld a,(prgwin)
         ld b,a
 msgsnd  ld a,(dskprzn)
 msgsnd1 db #dd:ld h,a
-        ld a,(prgprzn)
+        ld a,(App_PrcID)
         db #dd:ld l,a
-        ld iy,prgmsgb
+        ld iy,App_MsgBuf
         ld (iy+0),c
         ld (iy+1),b
         ld (iy+2),e
@@ -1315,7 +1367,7 @@ read "App-Calc-Float.asm"
 ;### DATA-AREA ################################################################
 ;==============================================================================
 
-prgdatbeg
+App_BegData
 
 prgicn16c db 12,24,24:dw $+7:dw $+4,12*24:db 5
 db #91,#11,#11,#11,#11,#11,#11,#11,#11,#11,#11,#19,#18,#88,#88,#88,#88,#88,#88,#88,#88,#88,#88,#a1,#18,#a9,#99,#99,#99,#99,#99,#99,#99,#99,#9a,#91,#18,#a9,#11,#11,#11,#11,#11,#11,#11,#11,#8a,#91
@@ -1325,30 +1377,24 @@ db #18,#aa,#aa,#aa,#aa,#aa,#aa,#aa,#aa,#aa,#aa,#91,#18,#a8,#9a,#89,#a8,#9a,#89,#
 db #18,#a8,#9a,#89,#a8,#9a,#89,#aa,#89,#a8,#9a,#91,#18,#a9,#1a,#91,#a9,#1a,#91,#aa,#91,#a8,#9a,#91,#18,#aa,#aa,#aa,#aa,#aa,#aa,#aa,#aa,#a8,#9a,#91,#18,#a8,#88,#89,#a8,#9a,#89,#aa,#89,#a8,#9a,#91
 db #18,#a9,#99,#91,#a9,#1a,#91,#aa,#91,#a9,#1a,#91,#18,#aa,#aa,#aa,#aa,#aa,#aa,#aa,#aa,#aa,#aa,#91,#1a,#99,#99,#99,#99,#99,#99,#99,#99,#99,#99,#91,#91,#11,#11,#11,#11,#11,#11,#11,#11,#11,#11,#19
 
+;==============================================================================
+;%%% MULTI LANGUAGE TEXTS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;==============================================================================
+
+texts_int
+read"App-Calc-Texts.asm"
+texts_int_end
+
+list
+texts_int_len   equ texts_int_end-texts_int
+nolist
+
 ;### Misc
 prgmsginf1 db "Pocket Calculator for SymbOS",0
-prgmsginf2 db " Version 1.0 (Build 061120pdt)",0
-prgmsginf3 db " Copyright <c> 2006 SymbiosiS",0
-
-prgwintit   db "Calculator",0
-
-;### Menu-Texts
-
-prgwinmentx1    db "Edit",0
-prgwinmen1tx1   db "Copy",0
-prgwinmen1tx2   db "Paste",0
-
-prgwinmentx2    db "View",0
-prgwinmen2tx1   db "Standard",0
-prgwinmen2tx2   db "Scientific",0
-prgwinmen2tx3   db "Deg",0
-prgwinmen2tx4   db "Rad",0
-prgwinmen2tx5   db "Group digits",0
-prgwinmen2tx6   db "US point format",0
-
-prgwinmentx3    db "?",0
-prgwinmen3tx1   db "Help topics",0
-prgwinmen3tx2   db "About Pocket Calculator",0
+prgtxtinf2  db " Version 1.1 (Build "
+read "..\..\..\SRC-Main\build.asm"
+            db "pdt)",0
+prgmsginf3 db " Copyright <c> 2025 SymbiosiS",0
 
 ;### Display
 dsptxtmem   db "M",0
@@ -1358,7 +1404,7 @@ dsptxtdeg   db "Deg",0
 dsptxtrad   db "Rad",0
 
 ;### Buttons
-buttxtbck   db "Back",0
+buttxtbck   db "<-",0
 buttxtce    db "CE",0
 buttxtc     db "C",0
 buttxtmc    db "MC",0
@@ -1402,24 +1448,18 @@ buttxtbro   db "(",0
 buttxtbrc   db ")",0
 buttxtexp   db "Exp",0
 
-;### Error messages
-errtxtzer   db "Division by zero",0
-errtxtovf   db "Overflow",0
-errtxtimp   db "Improper number",0
-errtxtstk   db "Stack full",0
-
 
 ;==============================================================================
 ;### TRANSFER AREA ############################################################
 ;==============================================================================
 
-prgtrnbeg
+App_BegTrns
 ;### PRGPRZS -> Stack for Program-Process
         ds 128
 prgstk  ds 6*2
         dw prgprz
-prgprzn db 0
-prgmsgb ds 14
+App_PrcID db 0
+App_MsgBuf ds 14
 
 ;### INFO-WINDOW ##############################################################
 
@@ -1559,7 +1599,7 @@ radiancoo   ds 4
 radianflg   db 1
 
 
-prgtrnend
+App_EndTrns
 
 relocate_table
 relocate_end
