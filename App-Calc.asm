@@ -1382,7 +1382,7 @@ db #18,#a9,#99,#91,#a9,#1a,#91,#aa,#91,#a9,#1a,#91,#18,#aa,#aa,#aa,#aa,#aa,#aa,#
 ;==============================================================================
 
 texts_int
-read"App-Calc-Texts.asm"
+read"App-Calc-i18n.asm"
 texts_int_end
 
 list
